@@ -2,53 +2,41 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Radio Globe HD</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Radio Globe Lite</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="//unpkg.com/globe.gl"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: -apple-system, system-ui, sans-serif; overflow: hidden; }
-        #globeViz { width: 100vw; height: 100vh; touch-action: none; }
+        #globeViz { width: 100vw; height: 100vh; }
         
-        /* Точка города */
-        .station-marker {
-            width: 10px; height: 10px; background: #00ff88;
-            border-radius: 50%; border: 2px solid rgba(255,255,255,0.3);
-            box-shadow: 0 0 10px #00ff88; cursor: pointer;
-        }
-
         /* Боковая панель */
         #side-drawer {
-            position: fixed; top: 0; left: -100%; width: 280px; height: 100%;
-            background: rgba(15, 15, 15, 0.95); backdrop-filter: blur(20px);
-            box-shadow: 10px 0 30px rgba(0,0,0,0.5); z-index: 1000;
-            transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            display: flex; flex-direction: column; border-right: 1px solid rgba(255,255,255,0.1);
+            position: fixed; top: 0; left: -100%; width: 260px; height: 100%;
+            background: rgba(10, 10, 10, 0.98); z-index: 1000;
+            transition: left 0.3s ease; display: flex; flex-direction: column;
+            border-right: 1px solid #333;
         }
         #side-drawer.open { left: 0; }
         
-        .drawer-header { padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); }
-        .drawer-header h2 { margin: 0; font-size: 18px; color: #00ff88; }
-        .drawer-header p { margin: 5px 0 0; font-size: 12px; opacity: 0.6; }
+        .drawer-header { padding: 20px; border-bottom: 1px solid #333; }
+        .drawer-header h2 { margin: 0; font-size: 16px; color: #00ff88; }
 
         #stations-list { flex: 1; overflow-y: auto; padding: 10px; }
         .station-item {
-            padding: 12px; margin-bottom: 8px; border-radius: 12px;
-            background: rgba(255,255,255,0.05); cursor: pointer;
-            font-size: 14px; transition: background 0.2s;
+            padding: 12px; margin-bottom: 5px; border-radius: 8px;
+            background: #1a1a1a; cursor: pointer; font-size: 13px;
         }
-        .station-item:active { background: rgba(0, 255, 136, 0.2); }
 
         #player-card {
-            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-            width: 85%; background: rgba(25, 25, 25, 0.98); padding: 16px;
-            border-radius: 20px; backdrop-filter: blur(20px);
-            display: none; z-index: 1100; border: 1px solid rgba(255,255,255,0.1);
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            width: 80%; background: #111; padding: 12px;
+            border-radius: 15px; display: none; z-index: 1100; border: 1px solid #333;
         }
-        #station-name { font-weight: 600; margin-bottom: 10px; font-size: 14px; text-align: center; }
-        audio { width: 100%; height: 35px; }
+        #station-name { font-weight: 600; margin-bottom: 8px; font-size: 13px; text-align: center; color: #00ff88; }
+        audio { width: 100%; height: 32px; }
 
-        #close-drawer { position: absolute; right: 15px; top: 20px; color: white; font-size: 24px; cursor: pointer; }
+        #close-drawer { position: absolute; right: 15px; top: 15px; color: #fff; font-size: 20px; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -57,10 +45,7 @@
 
     <div id="side-drawer">
         <span id="close-drawer">×</span>
-        <div class="drawer-header">
-            <h2 id="city-name">Станции</h2>
-            <p id="count-text">Выберите волну</p>
-        </div>
+        <div class="drawer-header"><h2 id="city-name">Станции</h2></div>
         <div id="stations-list"></div>
     </div>
 
@@ -80,40 +65,34 @@
         const stationTitle = document.getElementById('station-name');
 
         const world = Globe()(document.getElementById('globeViz'))
-            .globeImageUrl('//unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
-            .showAtmosphere(true).atmosphereColor('#3a6ca1')
-            .backgroundColor('#000000');
+            .globeImageUrl('//unpkg.com/three-globe/example/img/earth-night.jpg') // Темная карта
+            .backgroundColor('#000000')
+            .showAtmosphere(false) // Отключено для скорости
+            .pointColor(() => '#00ff88')
+            .pointRadius(0.5) // Размер точки
+            .pointAltitude(0) // Высота 0
+            .onPointClick(d => openCity(d));
 
-        world.renderer().setPixelRatio(window.devicePixelRatio);
-        world.controls().autoRotate = true;
-        world.controls().autoRotateSpeed = 0.3;
+        // Оптимизация рендерера
+        world.renderer().setPixelRatio(1); // Стандартное разрешение для скорости
+        world.controls().autoRotate = false; // Вращение отключено
 
-        // Группировка станций по координатам
-        fetch('https://de1.api.radio-browser.info/json/stations/search?limit=800&has_geo_info=true&hidebroken=true&https=true&order=clickcount&reverse=true')
+        // Загрузка данных (HTTPS + Группировка)
+        fetch('https://de1.api.radio-browser.info/json/stations/search?limit=600&has_geo_info=true&hidebroken=true&https=true&order=clickcount&reverse=true')
             .then(res => res.json())
             .then(data => {
                 const groups = {};
                 data.forEach(s => {
-                    const key = `${parseFloat(s.geo_lat).toFixed(2)},${parseFloat(s.geo_long).toFixed(2)}`;
+                    const key = `${parseFloat(s.geo_lat).toFixed(1)},${parseFloat(s.geo_long).toFixed(1)}`;
                     if (!groups[key]) groups[key] = { lat: s.geo_lat, lng: s.geo_long, city: s.state || s.country, stations: [] };
                     groups[key].stations.push(s);
                 });
-
-                world.htmlElementsData(Object.values(groups))
-                    .htmlElement(d => {
-                        const el = document.createElement('div');
-                        el.className = 'station-marker';
-                        el.onclick = () => openCity(d);
-                        return el;
-                    });
+                world.pointsData(Object.values(groups));
             });
 
         function openCity(data) {
             if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
-            
-            document.getElementById('city-name').innerText = data.city || "В этой точке";
-            document.getElementById('count-text').innerText = `Найдено станций: ${data.stations.length}`;
-            
+            document.getElementById('city-name').innerText = data.city || "Радиостанции";
             stationsList.innerHTML = '';
             data.stations.forEach(s => {
                 const item = document.createElement('div');
@@ -122,28 +101,19 @@
                 item.onclick = () => playStation(s);
                 stationsList.appendChild(item);
             });
-
             sideDrawer.classList.add('open');
         }
 
         function playStation(s) {
-            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
             stationTitle.innerText = "📡 " + s.name;
             audioPlayer.src = s.url_resolved;
             playerCard.style.display = 'block';
             audioPlayer.play();
-            // Закрываем меню на мобильных после выбора для удобства
             if (window.innerWidth < 500) sideDrawer.classList.remove('open');
         }
 
         document.getElementById('close-drawer').onclick = () => sideDrawer.classList.remove('open');
-        
-        // Закрытие по клику на глобус
-        world.onGlobeClick(() => {
-            sideDrawer.classList.remove('open');
-            playerCard.style.display = 'none';
-            audioPlayer.pause();
-        });
+        world.onGlobeClick(() => { sideDrawer.classList.remove('open'); });
     </script>
 </body>
 </html>
