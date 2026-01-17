@@ -2,126 +2,148 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Radio Globe TMA</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Radio Globe HD</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="//unpkg.com/globe.gl"></script>
     <style>
-        body { 
-            margin: 0; 
-            background: #000; 
-            color: white; 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
-            overflow: hidden; 
-        }
+        body { margin: 0; background: #000; color: white; font-family: -apple-system, system-ui, sans-serif; overflow: hidden; }
         #globeViz { width: 100vw; height: 100vh; touch-action: none; }
         
+        /* Точка города */
+        .station-marker {
+            width: 10px; height: 10px; background: #00ff88;
+            border-radius: 50%; border: 2px solid rgba(255,255,255,0.3);
+            box-shadow: 0 0 10px #00ff88; cursor: pointer;
+        }
+
+        /* Боковая панель */
+        #side-drawer {
+            position: fixed; top: 0; left: -100%; width: 280px; height: 100%;
+            background: rgba(15, 15, 15, 0.95); backdrop-filter: blur(20px);
+            box-shadow: 10px 0 30px rgba(0,0,0,0.5); z-index: 1000;
+            transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex; flex-direction: column; border-right: 1px solid rgba(255,255,255,0.1);
+        }
+        #side-drawer.open { left: 0; }
+        
+        .drawer-header { padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .drawer-header h2 { margin: 0; font-size: 18px; color: #00ff88; }
+        .drawer-header p { margin: 5px 0 0; font-size: 12px; opacity: 0.6; }
+
+        #stations-list { flex: 1; overflow-y: auto; padding: 10px; }
+        .station-item {
+            padding: 12px; margin-bottom: 8px; border-radius: 12px;
+            background: rgba(255,255,255,0.05); cursor: pointer;
+            font-size: 14px; transition: background 0.2s;
+        }
+        .station-item:active { background: rgba(0, 255, 136, 0.2); }
+
         #player-card {
             position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-            width: 85%; background: rgba(28, 28, 28, 0.9); padding: 16px;
-            border-radius: 24px; backdrop-filter: blur(15px);
-            display: none; box-shadow: 0 10px 40px rgba(0,0,0,0.6);
-            border: 1px solid rgba(255,255,255,0.1); text-align: center;
-            z-index: 10;
+            width: 85%; background: rgba(25, 25, 25, 0.98); padding: 16px;
+            border-radius: 20px; backdrop-filter: blur(20px);
+            display: none; z-index: 1100; border: 1px solid rgba(255,255,255,0.1);
         }
-        #station-name { 
-            font-weight: 600; margin-bottom: 12px; font-size: 15px; 
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
-        }
-        audio { width: 100%; height: 40px; border-radius: 8px; }
+        #station-name { font-weight: 600; margin-bottom: 10px; font-size: 14px; text-align: center; }
+        audio { width: 100%; height: 35px; }
 
-        /* Лоадер пока грузятся данные */
-        #loader {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            font-size: 14px; opacity: 0.7;
-        }
+        #close-drawer { position: absolute; right: 15px; top: 20px; color: white; font-size: 24px; cursor: pointer; }
     </style>
 </head>
 <body>
 
-    <div id="loader">Загрузка станций...</div>
     <div id="globeViz"></div>
 
+    <div id="side-drawer">
+        <span id="close-drawer">×</span>
+        <div class="drawer-header">
+            <h2 id="city-name">Станции</h2>
+            <p id="count-text">Выберите волну</p>
+        </div>
+        <div id="stations-list"></div>
+    </div>
+
     <div id="player-card">
-        <div id="station-name">Выберите станцию</div>
+        <div id="station-name">Слушаем...</div>
         <audio id="audio-player" controls></audio>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
-        tg.ready();
-        tg.expand();
-        tg.disableVerticalSwipes();
+        tg.ready(); tg.expand(); tg.disableVerticalSwipes();
 
+        const sideDrawer = document.getElementById('side-drawer');
+        const stationsList = document.getElementById('stations-list');
         const playerCard = document.getElementById('player-card');
         const audioPlayer = document.getElementById('audio-player');
-        const stationName = document.getElementById('station-name');
-        const loader = document.getElementById('loader');
+        const stationTitle = document.getElementById('station-name');
 
-        // Инициализация глобуса
-        const world = Globe()
-            (document.getElementById('globeViz'))
-            .globeImageUrl('//unpkg.com/three-globe/example/img/earth-night.jpg')
-            .pointColor(() => '#00ff88') // Ярко-зеленый
-            .pointRadius(0.7)
-            .pointAltitude(0.02)
-            .pointLabel('name') // Показывать имя при наведении (на ПК)
-            .onPointClick(point => {
-                playStation(point);
-            });
+        const world = Globe()(document.getElementById('globeViz'))
+            .globeImageUrl('//unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
+            .showAtmosphere(true).atmosphereColor('#3a6ca1')
+            .backgroundColor('#000000');
 
-        // Настройка атмосферы и управления
+        world.renderer().setPixelRatio(window.devicePixelRatio);
         world.controls().autoRotate = true;
-        world.controls().autoRotateSpeed = 0.5;
+        world.controls().autoRotateSpeed = 0.3;
 
-        // Загрузка данных: используем стабильный немецкий сервер (de1)
-        // Фильтруем: только HTTPS, только с координатами, только живые (hidebroken)
-        const api_url = 'https://de1.api.radio-browser.info/json/stations/search?limit=600&has_geo_info=true&hidebroken=true&https=true&order=clickcount&reverse=true';
-
-        fetch(api_url)
+        // Группировка станций по координатам
+        fetch('https://de1.api.radio-browser.info/json/stations/search?limit=800&has_geo_info=true&hidebroken=true&https=true&order=clickcount&reverse=true')
             .then(res => res.json())
-            .then(stations => {
-                loader.style.display = 'none';
-                const gData = stations.map(s => ({
-                    lat: parseFloat(s.geo_lat),
-                    lng: parseFloat(s.geo_long),
-                    name: s.name,
-                    url: s.url_resolved
-                }));
-                world.pointsData(gData);
-            })
-            .catch(err => {
-                console.error(err);
-                loader.innerText = "Ошибка загрузки данных";
+            .then(data => {
+                const groups = {};
+                data.forEach(s => {
+                    const key = `${parseFloat(s.geo_lat).toFixed(2)},${parseFloat(s.geo_long).toFixed(2)}`;
+                    if (!groups[key]) groups[key] = { lat: s.geo_lat, lng: s.geo_long, city: s.state || s.country, stations: [] };
+                    groups[key].stations.push(s);
+                });
+
+                world.htmlElementsData(Object.values(groups))
+                    .htmlElement(d => {
+                        const el = document.createElement('div');
+                        el.className = 'station-marker';
+                        el.onclick = () => openCity(d);
+                        return el;
+                    });
             });
 
-        function playStation(station) {
-            // Вибрация при нажатии
-            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+        function openCity(data) {
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+            
+            document.getElementById('city-name').innerText = data.city || "В этой точке";
+            document.getElementById('count-text').innerText = `Найдено станций: ${data.stations.length}`;
+            
+            stationsList.innerHTML = '';
+            data.stations.forEach(s => {
+                const item = document.createElement('div');
+                item.className = 'station-item';
+                item.innerText = s.name;
+                item.onclick = () => playStation(s);
+                stationsList.appendChild(item);
+            });
 
-            // Остановка вращения при выборе
-            world.controls().autoRotate = false;
+            sideDrawer.classList.add('open');
+        }
 
-            stationName.innerText = "📡 " + station.name;
-            audioPlayer.src = station.url;
+        function playStation(s) {
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+            stationTitle.innerText = "📡 " + s.name;
+            audioPlayer.src = s.url_resolved;
             playerCard.style.display = 'block';
-            
-            // Пытаемся запустить
-            const playPromise = audioPlayer.play();
-            
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    stationName.innerText = "Нажмите Play ▶️ " + station.name;
-                });
-            }
+            audioPlayer.play();
+            // Закрываем меню на мобильных после выбора для удобства
+            if (window.innerWidth < 500) sideDrawer.classList.remove('open');
         }
 
-        // Применяем цвета темы Telegram
-        if (tg.themeParams.bg_color) {
-            document.body.style.backgroundColor = tg.themeParams.bg_color;
-            playerCard.style.backgroundColor = tg.themeParams.secondary_bg_color || 'rgba(28, 28, 28, 0.9)';
-            document.body.style.color = tg.themeParams.text_color;
-        }
+        document.getElementById('close-drawer').onclick = () => sideDrawer.classList.remove('open');
+        
+        // Закрытие по клику на глобус
+        world.onGlobeClick(() => {
+            sideDrawer.classList.remove('open');
+            playerCard.style.display = 'none';
+            audioPlayer.pause();
+        });
     </script>
 </body>
 </html>
