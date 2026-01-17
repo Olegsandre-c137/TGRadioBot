@@ -3,20 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Radio Pro HD</title>
+    <title>Radio Pro Night</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://unpkg.com/three"></script>
     <script src="https://unpkg.com/globe.gl"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: -apple-system, system-ui, sans-serif; overflow: hidden; }
         
         #status-bar {
             position: fixed; top: 0; width: 100%; background: rgba(0,0,0,0.8);
-            backdrop-filter: blur(10px); padding: 12px; text-align: center;
+            backdrop-filter: blur(15px); padding: 12px; text-align: center;
             border-bottom: 1px solid #333; z-index: 1005; display: none;
         }
-        #status-city { font-size: 10px; text-transform: uppercase; color: #00ff88; margin-bottom: 4px; }
+        #status-city { font-size: 10px; text-transform: uppercase; color: #00ff88; }
         #status-station { font-size: 14px; font-weight: bold; color: #ffa500; }
+
+        /* Сферы станций (постоянный размер) */
+        .station-dot {
+            width: 8px; height: 8px; background: #00ff88;
+            border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
+            box-shadow: 0 0 8px #00ff88; cursor: pointer;
+            pointer-events: auto; transform: translate(-50%, -50%);
+        }
+        .station-dot.active { background: #ffa500; box-shadow: 0 0 12px #ffa500; width: 10px; height: 10px; }
 
         #menu-btn { position: fixed; top: 65px; left: 15px; z-index: 1001; background: #222; border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid #444; }
 
@@ -33,12 +41,12 @@
         .city-group { margin-bottom: 8px; background: #161616; border-radius: 8px; border: 1px solid #222; }
         .city-name { padding: 10px; font-size: 14px; cursor: pointer; display: flex; justify-content: space-between; }
         .station-sub-item { padding: 10px; font-size: 12px; border-top: 1px solid #222; color: #bbb; display: none; }
-        .city-group.active .station-sub-item { display: block; }
+        .city-group.active .station-sub-item { display: block; background: #111; }
 
         #player-container {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
             width: 85%; background: rgba(20,20,20,0.95); padding: 15px; border-radius: 20px;
-            z-index: 1100; border: 1px solid #333; display: none; backdrop-filter: blur(10px);
+            z-index: 1100; border: 1px solid #333; display: none;
         }
         .controls-row { display: flex; align-items: center; gap: 10px; }
         input[type=range] { flex: 1; accent-color: #ffa500; }
@@ -76,44 +84,46 @@
         tg.ready(); tg.expand();
 
         let allGroups = [];
-        let activePoint = null;
+        let currentUrl = null;
         const audioPlayer = document.getElementById('audio-player');
         
-        // Настройка глобуса
         const world = Globe()(document.getElementById('globeViz'))
-            .globeImageUrl('//unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
+            .globeImageUrl('//unpkg.com/three-globe/example/img/earth-night.jpg')
             .backgroundColor('#000000')
-            .showAtmosphere(true)
-            .atmosphereColor('#3a6ca1')
-            .pointRadius(0.5)
-            .pointAltitude(0.01)
-            .pointColor(d => (activePoint && d.lat === activePoint.lat && d.lng === activePoint.lng) ? '#ffa500' : '#00ff88')
-            .onPointClick(d => openCityUI(d));
+            .showAtmosphere(false)
+            .htmlElementsData([])
+            .htmlElement(d => {
+                const el = document.createElement('div');
+                el.className = 'station-dot';
+                if (currentUrl && d.stations.some(s => s.url_resolved === currentUrl)) el.classList.add('active');
+                el.onclick = () => openCityUI(d);
+                return el;
+            });
 
         world.controls().autoRotate = false;
-        world.renderer().setPixelRatio(window.devicePixelRatio);
+        world.renderer().setPixelRatio(1); // Для производительности
 
-        // Поиск на русском: сопоставление
-        const russianToEnglish = { 'москва': 'moscow', 'лондон': 'london', 'париж': 'paris', 'берлин': 'berlin', 'киев': 'kyiv', 'петербург': 'petersburg' };
+        const ruEnMap = { 'москва': 'moscow', 'петербург': 'petersburg', 'лондон': 'london', 'париж': 'paris' };
 
-        fetch('https://de1.api.radio-browser.info/json/stations/search?limit=800&has_geo_info=true&hidebroken=true&https=true')
+        fetch('https://de1.api.radio-browser.info/json/stations/search?limit=1000&has_geo_info=true&hidebroken=true&order=clickcount&reverse=true')
             .then(res => res.json())
             .then(data => {
                 const groups = {};
                 data.forEach(s => {
-                    const key = `${s.geo_lat.toFixed(1)},${s.geo_long.toFixed(1)}`;
-                    if (!groups[key]) {
-                        groups[key] = { 
+                    // Группируем по названию штата/города + страны, чтобы не схлопывать разные города
+                    const cityKey = (s.state || s.country || 'Unknown').toLowerCase();
+                    if (!groups[cityKey]) {
+                        groups[cityKey] = { 
                             lat: s.geo_lat, lng: s.geo_long, 
                             city: s.state || s.country || 'Unknown',
                             searchTag: (s.state + ' ' + s.country + ' ' + s.tags).toLowerCase(),
                             stations: [] 
                         };
                     }
-                    groups[key].stations.push(s);
+                    groups[cityKey].stations.push(s);
                 });
                 allGroups = Object.values(groups);
-                world.pointsData(allGroups);
+                world.htmlElementsData(allGroups);
                 renderList(allGroups);
             });
 
@@ -137,14 +147,16 @@
         }
 
         function openCityUI(d) {
-            world.pointOfView({ lat: d.lat, lng: d.lng, alt: 1.5 }, 1000);
+            world.pointOfView({ lat: d.lat, lng: d.lng, alt: 1.5 }, 800);
             renderList([d]);
             document.getElementById('side-drawer').classList.add('open');
+            const firstGroup = document.querySelector('.city-group');
+            if (firstGroup) firstGroup.classList.add('active');
         }
 
         function play(s, g) {
-            activePoint = { lat: g.lat, lng: g.lng };
-            world.pointsData([...allGroups]); // Обновляем оранжевую точку
+            currentUrl = s.url_resolved;
+            world.htmlElementsData([...allGroups]); // Перерисовать точки для смены цвета
 
             document.getElementById('status-bar').style.display = 'block';
             document.getElementById('status-city').innerText = g.city;
@@ -158,7 +170,7 @@
 
         document.getElementById('search-input').oninput = (e) => {
             let val = e.target.value.toLowerCase();
-            for (let key in russianToEnglish) { if (val.includes(key)) val += ' ' + russianToEnglish[key]; }
+            for (let key in ruEnMap) { if (val.includes(key)) val += ' ' + ruEnMap[key]; }
             const filtered = allGroups.filter(g => g.searchTag.includes(val) || g.city.toLowerCase().includes(val));
             renderList(filtered);
         };
