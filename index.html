@@ -3,117 +3,152 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Radio Globe Lite</title>
+    <title>Radio Globe Ultra</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="//unpkg.com/globe.gl"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: -apple-system, system-ui, sans-serif; overflow: hidden; }
         #globeViz { width: 100vw; height: 100vh; }
         
-        /* Боковая панель */
+        /* Зона для вытягивания меню */
+        #edge-dragger { position: fixed; top: 0; left: 0; width: 20px; height: 100%; z-index: 999; }
+
+        /* Кнопка меню */
+        #menu-btn { 
+            position: fixed; top: 15px; left: 15px; z-index: 1001; 
+            background: rgba(40,40,40,0.8); border-radius: 50%; width: 40px; height: 40px;
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
+        }
+
         #side-drawer {
-            position: fixed; top: 0; left: -100%; width: 260px; height: 100%;
-            background: rgba(10, 10, 10, 0.98); z-index: 1000;
+            position: fixed; top: 0; left: -280px; width: 260px; height: 100%;
+            background: rgba(15, 15, 15, 0.98); z-index: 1002;
             transition: left 0.3s ease; display: flex; flex-direction: column;
             border-right: 1px solid #333;
         }
         #side-drawer.open { left: 0; }
         
-        .drawer-header { padding: 20px; border-bottom: 1px solid #333; }
-        .drawer-header h2 { margin: 0; font-size: 16px; color: #00ff88; }
+        .drawer-header { padding: 15px; border-bottom: 1px solid #333; }
+        #search-input { 
+            width: 100%; padding: 8px; border-radius: 8px; border: none; 
+            background: #222; color: #fff; box-sizing: border-box; outline: none;
+        }
 
         #stations-list { flex: 1; overflow-y: auto; padding: 10px; }
-        .station-item {
-            padding: 12px; margin-bottom: 5px; border-radius: 8px;
-            background: #1a1a1a; cursor: pointer; font-size: 13px;
+        .city-item { 
+            padding: 10px; margin-bottom: 4px; background: #1a1a1a; 
+            border-radius: 6px; font-size: 13px; cursor: pointer; color: #00ff88;
         }
+        .station-item { padding: 8px; margin: 2px 0; font-size: 12px; color: #ddd; border-bottom: 1px solid #222; }
 
         #player-card {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            width: 80%; background: #111; padding: 12px;
-            border-radius: 15px; display: none; z-index: 1100; border: 1px solid #333;
+            width: 85%; background: #111; padding: 10px; border-radius: 12px;
+            display: none; z-index: 1100; border: 1px solid #333;
         }
-        #station-name { font-weight: 600; margin-bottom: 8px; font-size: 13px; text-align: center; color: #00ff88; }
-        audio { width: 100%; height: 32px; }
-
-        #close-drawer { position: absolute; right: 15px; top: 15px; color: #fff; font-size: 20px; cursor: pointer; }
+        #station-name { font-weight: bold; margin-bottom: 5px; font-size: 12px; text-align: center; color: #00ff88; }
+        audio { width: 100%; height: 30px; }
     </style>
 </head>
 <body>
 
+    <div id="menu-btn">☰</div>
+    <div id="edge-dragger"></div>
     <div id="globeViz"></div>
 
     <div id="side-drawer">
-        <span id="close-drawer">×</span>
-        <div class="drawer-header"><h2 id="city-name">Станции</h2></div>
+        <div class="drawer-header">
+            <input type="text" id="search-input" placeholder="Поиск города...">
+        </div>
         <div id="stations-list"></div>
     </div>
 
     <div id="player-card">
-        <div id="station-name">Слушаем...</div>
+        <div id="station-name">...</div>
         <audio id="audio-player" controls></audio>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
-        tg.ready(); tg.expand(); tg.disableVerticalSwipes();
+        tg.ready(); tg.expand();
 
+        let allGroups = [];
         const sideDrawer = document.getElementById('side-drawer');
         const stationsList = document.getElementById('stations-list');
-        const playerCard = document.getElementById('player-card');
+        const searchInput = document.getElementById('search-input');
         const audioPlayer = document.getElementById('audio-player');
-        const stationTitle = document.getElementById('station-name');
 
         const world = Globe()(document.getElementById('globeViz'))
-            .globeImageUrl('//unpkg.com/three-globe/example/img/earth-night.jpg') // Темная карта
+            .globeImageUrl('//unpkg.com/three-globe/example/img/earth-night.jpg')
             .backgroundColor('#000000')
-            .showAtmosphere(false) // Отключено для скорости
-            .pointColor(() => '#00ff88')
-            .pointRadius(0.5) // Размер точки
-            .pointAltitude(0) // Высота 0
-            .onPointClick(d => openCity(d));
+            .showAtmosphere(false)
+            // Используем Labels вместо Points для фиксированного размера
+            .labelsData([])
+            .labelLat(d => d.lat)
+            .labelLng(d => d.lng)
+            .labelText(d => '') // Текст не нужен
+            .labelDotRadius(0.5) // Размер точки (не меняется при зуме)
+            .labelColor(() => '#00ff88')
+            .onLabelClick(d => openCity(d));
 
-        // Оптимизация рендерера
-        world.renderer().setPixelRatio(1); // Стандартное разрешение для скорости
-        world.controls().autoRotate = false; // Вращение отключено
+        world.renderer().setPixelRatio(1);
+        world.controls().autoRotate = false;
 
-        // Загрузка данных (HTTPS + Группировка)
-        fetch('https://de1.api.radio-browser.info/json/stations/search?limit=600&has_geo_info=true&hidebroken=true&https=true&order=clickcount&reverse=true')
+        fetch('https://de1.api.radio-browser.info/json/stations/search?limit=1000&has_geo_info=true&hidebroken=true&order=clickcount&reverse=true')
             .then(res => res.json())
             .then(data => {
                 const groups = {};
                 data.forEach(s => {
                     const key = `${parseFloat(s.geo_lat).toFixed(1)},${parseFloat(s.geo_long).toFixed(1)}`;
-                    if (!groups[key]) groups[key] = { lat: s.geo_lat, lng: s.geo_long, city: s.state || s.country, stations: [] };
+                    if (!groups[key]) groups[key] = { lat: s.geo_lat, lng: s.geo_long, city: s.state || s.country || 'Unknown', stations: [] };
                     groups[key].stations.push(s);
                 });
-                world.pointsData(Object.values(groups));
+                allGroups = Object.values(groups);
+                world.labelsData(allGroups);
+                renderList(allGroups);
             });
 
-        function openCity(data) {
-            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
-            document.getElementById('city-name').innerText = data.city || "Радиостанции";
+        function renderList(data) {
             stationsList.innerHTML = '';
+            data.forEach(g => {
+                const div = document.createElement('div');
+                div.className = 'city-item';
+                div.innerText = g.city;
+                div.onclick = () => {
+                    world.pointOfView({ lat: g.lat, lng: g.lng, alt: 1.5 }, 1000);
+                    openCity(g);
+                };
+                stationsList.appendChild(div);
+            });
+        }
+
+        searchInput.oninput = (e) => {
+            const val = e.target.value.toLowerCase();
+            const filtered = allGroups.filter(g => g.city.toLowerCase().includes(val));
+            renderList(filtered);
+        };
+
+        function openCity(data) {
+            stationsList.innerHTML = `<div style="padding:10px; color:#00ff88; font-weight:bold;">${data.city}</div>`;
             data.stations.forEach(s => {
                 const item = document.createElement('div');
                 item.className = 'station-item';
                 item.innerText = s.name;
-                item.onclick = () => playStation(s);
+                item.onclick = () => {
+                    document.getElementById('station-name').innerText = s.name;
+                    // FIX для HTTP: пытаемся форсировать HTTPS
+                    audioPlayer.src = s.url_resolved.replace('http://', 'https://');
+                    document.getElementById('player-card').style.display = 'block';
+                    audioPlayer.play();
+                };
                 stationsList.appendChild(item);
             });
             sideDrawer.classList.add('open');
         }
 
-        function playStation(s) {
-            stationTitle.innerText = "📡 " + s.name;
-            audioPlayer.src = s.url_resolved;
-            playerCard.style.display = 'block';
-            audioPlayer.play();
-            if (window.innerWidth < 500) sideDrawer.classList.remove('open');
-        }
-
-        document.getElementById('close-drawer').onclick = () => sideDrawer.classList.remove('open');
-        world.onGlobeClick(() => { sideDrawer.classList.remove('open'); });
+        document.getElementById('menu-btn').onclick = () => sideDrawer.classList.toggle('open');
+        document.getElementById('edge-dragger').onclick = () => sideDrawer.classList.add('open');
+        world.onGlobeClick(() => sideDrawer.classList.remove('open'));
     </script>
 </body>
 </html>
