@@ -9,13 +9,14 @@
     <style>
         body { margin: 0; background: #000; color: white; font-family: -apple-system, sans-serif; overflow: hidden; }
         #status-bar {
-            position: fixed; top: 0; width: 100%; background: rgba(0,0,0,0.9);
+            position: fixed; top: 0; width: 100%; background: rgba(0,0,0,0.95);
             padding: 12px; text-align: center; border-bottom: 1px solid #333; z-index: 1005; display: none;
         }
+        #status-city { font-size: 10px; color: #00ff88; text-transform: uppercase; }
         #status-station { font-size: 14px; font-weight: bold; color: #ffa500; }
         
-        #controls { position: fixed; top: 65px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 1001; pointer-events: none; }
-        .btn { background: #222; border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid #444; pointer-events: auto; color: white; text-decoration: none; }
+        #controls { position: fixed; top: 60px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 1001; pointer-events: none; }
+        .btn { background: rgba(34, 34, 34, 0.9); border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid #444; pointer-events: auto; color: white; font-size: 20px; }
 
         #side-drawer {
             position: fixed; top: 0; left: -280px; width: 260px; height: 100%;
@@ -23,21 +24,26 @@
         }
         #side-drawer.open { left: 0; }
         .drawer-header { padding: 20px; margin-top: 40px; }
-        #search-input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #444; background: #111; color: #fff; outline: none; }
+        #search-input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #444; background: #111; color: #fff; outline: none; }
+        
         #stations-list { flex: 1; overflow-y: auto; padding: 10px; }
-        .city-group { margin-bottom: 8px; background: #1a1a1a; border-radius: 8px; border: 1px solid #333; overflow: hidden; }
-        .city-name { padding: 10px; font-size: 14px; cursor: pointer; display: flex; justify-content: space-between; }
-        .station-sub-item { padding: 10px; font-size: 12px; border-top: 1px solid #222; color: #bbb; }
+        .city-group { margin-bottom: 8px; background: #1a1a1a; border-radius: 10px; border: 1px solid #333; overflow: hidden; }
+        .city-name { padding: 12px; font-size: 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .station-sub-item { padding: 10px 15px; font-size: 13px; border-top: 1px solid #222; color: #ccc; cursor: pointer; }
+        .station-sub-item:active { background: #333; }
 
         #player-container {
-            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%);
             width: 85%; background: #111; padding: 15px; border-radius: 20px; z-index: 1100; border: 1px solid #333; display: none;
         }
     </style>
 </head>
 <body>
 
-    <div id="status-bar"><div id="status-station">Выбор станции...</div></div>
+    <div id="status-bar">
+        <div id="status-city">ГОРОД</div>
+        <div id="status-station">Название</div>
+    </div>
 
     <div id="controls">
         <div class="btn" onclick="toggleDrawer()">☰</div>
@@ -47,14 +53,15 @@
     <div id="globeViz"></div>
 
     <div id="side-drawer">
-        <div class="drawer-header"><input type="text" id="search-input" placeholder="Поиск города..."></div>
+        <div class="drawer-header"><input type="text" id="search-input" placeholder="Поиск (Москва, London...)"></div>
         <div id="stations-list"></div>
     </div>
 
     <div id="player-container">
-        <div style="display:flex; align-items:center; gap:10px;">
-            <span id="play-icon">🔈</span>
+        <div style="display:flex; align-items:center; gap:12px;">
+            <span>🔈</span>
             <input type="range" id="volume-control" min="0" max="1" step="0.01" value="0.8" style="flex:1; accent-color:#ffa500;">
+            <span id="time-display" style="font-size:12px; font-family:monospace; color:#888;">00:00</span>
         </div>
         <audio id="audio-player"></audio>
     </div>
@@ -64,58 +71,52 @@
         tg.ready();
 
         let allGroups = [];
-        let activePoint = null;
+        let activePointId = null;
         const audioPlayer = document.getElementById('audio-player');
 
         const world = Globe()(document.getElementById('globeViz'))
             .globeImageUrl('//unpkg.com/three-globe/example/img/earth-night.jpg')
             .backgroundColor('#000000')
             .showAtmosphere(false)
-            // Настройка WebGL точек (быстрее чем HTML)
-            .pointsData([])
-            .pointRadius(d => d.isCluster ? 1.2 : 0.6)
-            .pointColor(d => (activePoint && d.id === activePoint.id) ? '#ffa500' : '#00ff88')
+            .pointRadius(0.7)
+            .pointColor(d => d.id === activePointId ? '#ffa500' : '#00ff88')
             .pointAltitude(0.01)
-            .onPointClick(d => {
-                if (d.isCluster) {
-                    // При клике на кластер - приближаем
-                    world.pointOfView({ lat: d.lat, lng: d.lng, alt: world.pointOfView().alt * 0.6 }, 800);
-                } else {
-                    openCityUI(d);
-                }
-            });
+            .onPointClick(d => openCityUI(d));
 
-        // Ограничения зума
         const controls = world.controls();
-        controls.minDistance = 150; // Максимальное приближение
-        controls.maxDistance = 500; // Максимальное удаление
-        world.renderer().setPixelRatio(window.devicePixelRatio > 1 ? 1.5 : 1);
+        controls.minDistance = 150;
+        controls.maxDistance = 500;
 
-        fetch('https://de1.api.radio-browser.info/json/stations/search?limit=1500&has_geo_info=true&hidebroken=true&order=clickcount&reverse=true')
+        // Карта транслитерации для объединения Москва/Moscow
+        const cityAlias = { 'москва': 'moscow', 'moscow': 'moscow', 'petersburg': 'petersburg', 'петербург': 'petersburg' };
+
+        fetch('https://de1.api.radio-browser.info/json/stations/search?limit=2000&has_geo_info=true&hidebroken=true&order=clickcount&reverse=true')
             .then(res => res.json())
             .then(data => {
                 const groups = {};
-                data.forEach((s, idx) => {
-                    const key = (s.state || s.country || 'Unknown').toLowerCase();
-                    if (!groups[key]) {
-                        groups[key] = { 
-                            id: key, lat: s.geo_lat, lng: s.geo_long, 
+                data.forEach(s => {
+                    const rawName = (s.state || s.country || 'Unknown').toLowerCase();
+                    // Объединяем по алиасу или по округленным координатам (для кластеризации близких точек)
+                    const nameKey = cityAlias[rawName] || rawName;
+                    const geoKey = `${Math.round(s.geo_lat * 2) / 2},${Math.round(s.geo_long * 2) / 2}`;
+                    const finalKey = `${nameKey}_${geoKey}`;
+
+                    if (!groups[finalKey]) {
+                        groups[finalKey] = { 
+                            id: finalKey, lat: s.geo_lat, lng: s.geo_long, 
                             city: s.state || s.country || 'Unknown',
                             searchTag: (s.state + ' ' + s.country + ' ' + s.tags).toLowerCase(),
                             stations: [] 
                         };
                     }
-                    groups[key].stations.push(s);
+                    groups[finalKey].stations.push(s);
                 });
                 allGroups = Object.values(groups);
-                updatePoints();
+                world.pointsData(allGroups);
                 renderList(allGroups);
+                
+                setTimeout(findUserLocation, 1000);
             });
-
-        // Функция кластеризации "на лету" (упрощенная)
-        function updatePoints() {
-            world.pointsData(allGroups);
-        }
 
         function renderList(data) {
             const list = document.getElementById('stations-list');
@@ -123,7 +124,7 @@
             data.forEach(g => {
                 const groupDiv = document.createElement('div');
                 groupDiv.className = 'city-group';
-                groupDiv.innerHTML = `<div class="city-name"><span>${g.city}</span><small>${g.stations.length}</small></div>`;
+                groupDiv.innerHTML = `<div class="city-name"><span>${g.city}</span><small style="color:#00ff88">${g.stations.length}</small></div>`;
                 g.stations.forEach(s => {
                     const sDiv = document.createElement('div');
                     sDiv.className = 'station-sub-item';
@@ -136,20 +137,24 @@
             });
         }
 
-        function openCityUI(d) {
-            activePoint = d;
-            world.pointsData([...allGroups]); // Обновить цвета
-            world.pointOfView({ lat: d.lat, lng: d.lng, alt: 1.2 }, 800);
-            renderList([d]);
-            document.getElementById('side-drawer').classList.add('open');
-        }
-
         function play(s, g) {
+            activePointId = g.id;
+            world.pointsData([...allGroups]); // Перекраска точки
+
             document.getElementById('status-bar').style.display = 'block';
+            document.getElementById('status-city').innerText = g.city;
             document.getElementById('status-station').innerText = s.name;
+            
             audioPlayer.src = s.url_resolved.replace('http://', 'https://');
             document.getElementById('player-container').style.display = 'block';
             audioPlayer.play();
+        }
+
+        function openCityUI(d) {
+            world.pointOfView({ lat: d.lat, lng: d.lng, alt: 1.2 }, 800);
+            renderList([d]);
+            document.getElementById('side-drawer').classList.add('open');
+            document.querySelector('.city-group').classList.add('active');
         }
 
         function findUserLocation() {
@@ -157,14 +162,6 @@
                 navigator.geolocation.getCurrentPosition(pos => {
                     const { latitude: lat, longitude: lng } = pos.coords;
                     world.pointOfView({ lat, lng, alt: 1.2 }, 1200);
-                    // Ищем ближайшую станцию
-                    let nearest = allGroups[0];
-                    let minD = Infinity;
-                    allGroups.forEach(g => {
-                        let d = Math.hypot(g.lat - lat, g.lng - lng);
-                        if(d < minD) { minD = d; nearest = g; }
-                    });
-                    if(minD < 5) play(nearest.stations[0], nearest);
                 });
             }
         }
@@ -178,6 +175,11 @@
         };
 
         document.getElementById('volume-control').oninput = (e) => audioPlayer.volume = e.target.value;
+        audioPlayer.ontimeupdate = () => {
+            const m = Math.floor(audioPlayer.currentTime / 60);
+            const s = Math.floor(audioPlayer.currentTime % 60);
+            document.getElementById('time-display').innerText = `${m}:${s < 10 ? '0' : ''}${s}`;
+        };
         world.onGlobeClick(() => document.getElementById('side-drawer').classList.remove('open'));
     </script>
 </body>
