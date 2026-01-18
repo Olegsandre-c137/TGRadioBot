@@ -114,7 +114,7 @@
 
         const ruEnMap = { 'москва': 'moscow', 'петербург': 'petersburg', 'лондон': 'london', 'париж': 'paris' };
 
-        fetch('https://de1.api.radio-browser.info/json/stations/search?limit=1000&has_geo_info=true&hidebroken=true&order=clickcount&reverse=true')
+        fetch('https://de1.api.radio-browser.info/json/stations/search?limit=5000&has_geo_info=true&hidebroken=true&order=clickcount&reverse=true')
             .then(res => res.json())
             .then(data => {
                 const groups = {};
